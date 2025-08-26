@@ -4,6 +4,7 @@ from datetime import datetime
 from telegram import Bot
 from config import get_db_connection
 from dotenv import load_dotenv
+import asyncio
 load_dotenv()
 
 # Config
@@ -189,12 +190,12 @@ def save_to_db(prices, category, last_updated, now):
     finally:
         conn.close()
 
-def send_hourly_coin_summary(data, target_symbols):
+async def send_hourly_coin_summary(data, target_symbols):
     try:
         prices, _ = extract_target_price(data, target_symbols)
         coin_info = extract_target_info(data, target_symbols)
         message = format_hourly_coin_summary(prices, coin_info)
-        bot.send_message(chat_id=GROUP_CHAT_ID, text=message, parse_mode='Markdown')
+        await bot.send_message(chat_id=GROUP_CHAT_ID, text=message, parse_mode='Markdown')
         print("Hourly sent.")
 
     except Exception as e:
@@ -202,7 +203,7 @@ def send_hourly_coin_summary(data, target_symbols):
 
 
 
-def run_price_monitor():
+async def run_price_monitor():
     last_news_hour = -1  
 
     while True:
@@ -210,18 +211,15 @@ def run_price_monitor():
         minute = now.minute
         hour = now.hour
 
-        # Only run logic every 5 minutes
         if minute % 5 == 0:
             try:
                 data = get_all_crypto()
                 prices, last_updated = extract_target_price(data, TARGET_SYMBOLS)
 
-                # Always save & check 5m
                 check_target_changes("5m", data, TARGET_SYMBOLS)
                 save_to_db(prices, "5m", last_updated, now)
                 print("5m saved and checked")
 
-                # Prioritized saving: 30m > 15m > 10m
                 if minute % 30 == 0:
                     save_to_db(prices, "30m", last_updated, now)
                     print("30m saved")
@@ -234,27 +232,21 @@ def run_price_monitor():
                     save_to_db(prices, "10m", last_updated, now)
                     print("10m saved")
 
-                # Hourly summary
                 if minute == 0:
-                    send_hourly_coin_summary(data, TARGET_SYMBOLS)
+                    await send_hourly_coin_summary(data, TARGET_SYMBOLS)
 
                     if hour % 8 == 0 and hour != last_news_hour:
                         panic_news = get_latest_cryptopanic_news(TARGET_SYMBOLS)
-                        # cmc_news = get_latest_cmc_news()
-                        # filtered_cmc_news = filter_cmc_news(cmc_news)
-                        send_news(panic_news, '')
+                        await send_news(panic_news, '')
                         last_news_hour = hour
-
 
             except Exception as e:
                 print("Error occurred:", e)
 
-            # Avoid sleeping full 5m if you're syncing exactly on minute boundaries
-            time.sleep(60)
+            await asyncio.sleep(60)  # async sleep
 
         else:
-            # Sleep until the next minute
-            time.sleep(60 - datetime.now().second)
+            await asyncio.sleep(60 - datetime.now().second)
 
 
 #Other utilities
@@ -293,7 +285,7 @@ def format_number(number):
         return f'{number:.0f}'
 
 #Telegram Bot
-def send_coin_alert_message(coin_name, symbol, price, usd_price, change_1h, change_24h, interval_change, last_updated, interval):
+async def send_coin_alert_message(coin_name, symbol, price, usd_price, change_1h, change_24h, interval_change, last_updated, interval):
     emoji_1h = "📈" if change_1h >= 0 else "📉"
     emoji_24h = "📈" if change_24h >= 0 else "📉"
     message = f"""
@@ -308,7 +300,7 @@ def send_coin_alert_message(coin_name, symbol, price, usd_price, change_1h, chan
 {emoji_24h} *24h Change:* {change_24h:+.2f}%
 🕒 *Last Updated:* {last_updated}
     """
-    bot.send_message(chat_id=GROUP_CHAT_ID, text=message, parse_mode='Markdown')
+    await bot.send_message(chat_id=GROUP_CHAT_ID, text=message, parse_mode='Markdown')
 
 def format_hourly_coin_summary(prices, coin_info):
     usdtoidr = get_usd_to_idr_rate()
@@ -331,7 +323,7 @@ def format_hourly_coin_summary(prices, coin_info):
 
     return "\n".join(message_lines)
 
-def send_news(crypto_panic_news, cmc_news):
+async def send_news(crypto_panic_news, cmc_news):
     message = "📰 *Latest Crypto News Roundup*\n\n"
 
     if crypto_panic_news:
@@ -362,11 +354,11 @@ def send_news(crypto_panic_news, cmc_news):
             message += f"• [{title}]({url})\n"
             message += f"_🕒 {published_at}_\n\n"
     
-    bot.send_message(chat_id=GROUP_CHAT_ID, text=message, parse_mode='Markdown')
+    await bot.send_message(chat_id=GROUP_CHAT_ID, text=message, parse_mode='Markdown')
 
 
-def main():
-    run_price_monitor()
+async def main():
+    await run_price_monitor()
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())
